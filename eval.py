@@ -3,12 +3,13 @@ import torch
 import numpy as np
 from einops import rearrange
 from tqdm.auto import tqdm, trange
+from safetensors.torch import load_file
 
-from thop import profile
-from thop import clever_format
+# from thop import profile
+# from thop import clever_format
 
 
-def sample_ar(ckpt_path, data_path, id=None, prompt=None):
+def sample_ar(unet_path, conditioner_path, data_path, id=None, prompt=None):
     from diffusers import AutoencoderKL
     from diffusers.image_processor import VaeImageProcessor
     from ar import get_models, parse_args
@@ -25,14 +26,17 @@ def sample_ar(ckpt_path, data_path, id=None, prompt=None):
     vae = AutoencoderKL.from_pretrained(os.path.join(args.sd_path, "vae"))
     image_processor = VaeImageProcessor(vae_scale_factor=vae.config.scaling_factor)
 
-    exp_name = ckpt_path.split("/")[-1].split("-")[0]
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    global_step = ckpt["global_step"]
-    print(f"global_step: {global_step}")
+    # exp_name = ckpt_path.split("/")[-1].split("-")[0]
+    # ckpt = torch.load(ckpt_path, map_location="cpu")
+    # global_step = ckpt["global_step"]
+    # print(f"global_step: {global_step}")
 
-    unet.load_state_dict(ckpt['unet'])
-    conditioner.load_state_dict(ckpt['conditioner'])
-    del ckpt
+    unet_state_path = os.path.join(unet_path, "diffusion_pytorch_model.safetensors")
+    unet_state_dict = load_file(unet_state_path)
+    unet.load_state_dict(unet_state_dict)
+
+    conditioner.from_pretrained(conditioner_path)
+
     vae = vae.to(device)
     unet = unet.to(device)
     conditioner = conditioner.to(device)
@@ -101,7 +105,7 @@ def sample_ar(ckpt_path, data_path, id=None, prompt=None):
             tag = id
         else:
             tag = prompt
-        images[0].save(f"./samples/ar_{exp_name}_{int(global_step/1000)}k_{tag}.gif", save_all=True, append_images=images[1:], loop=0, duration=125)
+        images[0].save(f"./samples/samples_{tag}.gif", save_all=True, append_images=images[1:], loop=0, duration=125)
         
 
 def sample_next_frame(frame_id, unet, conditioner, scheduler, current_latents, txt_embedding, device):
@@ -127,7 +131,9 @@ def sample_next_frame(frame_id, unet, conditioner, scheduler, current_latents, t
 if __name__ == "__main__":
     for i in range(10):
         sample_ar(
-            ckpt_path="/home/jiachun/codebase/vsd/ar/experiment/8fps_4096_uncon0.5/8fps_4096_uncon0.5-40000-ckpt",
+            # ckpt_path="/home/jiachun/codebase/vsd/ar/experiment/8fps_4096_uncon0.5/8fps_4096_uncon0.5-40000-ckpt",
+            unet_path="/home/jiachun/codebase/vid_gen/experiment/test_hf/test_hf-unet-0",
+            conditioner_path="/home/jiachun/codebase/vid_gen/experiment/test_hf/test_hf-conditioner-0",
             data_path="/data/vsd_data/captioned_8s_64f_motion",
 
             # ckpt_path="/home/jiachun/codebase/vsd/cog/experiment/2k/2k-35000-ckpt",

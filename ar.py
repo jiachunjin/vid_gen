@@ -303,17 +303,23 @@ def main():
                     unet.eval()
                     conditioner.eval()
                     if accelerator.is_main_process:
-                        save_path = os.path.join(args.output_dir, f"{args.exp_name}-{global_step}-ckpt")
+                        # save_path = os.path.join(args.output_dir, f"{args.exp_name}-{global_step}-ckpt")
                         unwarped_unet = accelerator.unwrap_model(unet)
                         unwarped_conditioner = accelerator.unwrap_model(conditioner)
-                        torch.save(
-                            {
-                                "unet": unwarped_unet.state_dict(),
-                                "conditioner": unwarped_conditioner.state_dict(),
-                                "global_step": global_step,
-                            },
-                            save_path
-                        )
+                        # torch.save(
+                        #     {
+                        #         "unet": unwarped_unet.state_dict(),
+                        #         "conditioner": unwarped_conditioner.state_dict(),
+                        #         "global_step": global_step,
+                        #     },
+                        #     save_path
+                        # )
+                        unwarped_unet.save_pretrained(os.path.join(args.output_dir, f"{args.exp_name}-unet-{int(global_step / 1000)}"))
+                        unwarped_unet.push_to_hub("orres/vid_gen")
+                        unwarped_conditioner.save_pretrained(os.path.join(args.output_dir, f"{args.exp_name}-conditioner-{int(global_step / 1000)}"))
+                        unwarped_conditioner.push_to_hub("orres/vid_gen")
+                        logger.info(f"pushed to hugging face at step {global_step}")
+
                 accelerator.wait_for_everyone()
 
             if global_step >= args.max_train_steps:

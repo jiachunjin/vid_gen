@@ -12,6 +12,7 @@ from diffusers.models.unets.unet_2d_blocks import CrossAttnDownBlock2D, DownBloc
 
 from einops import rearrange, repeat
 from typing import Any, Dict, List, Optional, Tuple, Union
+from huggingface_hub import PyTorchModelHubMixin
 
 
 def FeedForward(dim, mult=4):
@@ -74,7 +75,7 @@ class PerceiverAttention(nn.Module):
         return self.to_out(out)
 
 
-class Conditioner(nn.Module):
+class Conditioner(nn.Module, PyTorchModelHubMixin):
     def __init__(self, *, dim, depth, num_latents, num_media_embeds, patch_size=8, dim_head=88, heads=16, ff_mult=4):
         super().__init__()
         self.dim = dim
