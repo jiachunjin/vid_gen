@@ -315,8 +315,9 @@ def main():
                         #     save_path
                         # )
                         unwarped_unet.save_pretrained(os.path.join(args.output_dir, f"{args.exp_name}-unet-{int(global_step / 1000)}"))
-                        unwarped_unet.push_to_hub("orres/vid_gen")
                         unwarped_conditioner.save_pretrained(os.path.join(args.output_dir, f"{args.exp_name}-conditioner-{int(global_step / 1000)}"))
+                        
+                        unwarped_unet.push_to_hub("orres/vid_gen")
                         unwarped_conditioner.push_to_hub("orres/vid_gen")
                         logger.info(f"pushed to hugging face at step {global_step}")
 

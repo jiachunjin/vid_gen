@@ -132,8 +132,8 @@ if __name__ == "__main__":
     for i in range(10):
         sample_ar(
             # ckpt_path="/home/jiachun/codebase/vsd/ar/experiment/8fps_4096_uncon0.5/8fps_4096_uncon0.5-40000-ckpt",
-            unet_path="/home/jiachun/codebase/vid_gen/experiment/test_hf/test_hf-unet-0",
-            conditioner_path="/home/jiachun/codebase/vid_gen/experiment/test_hf/test_hf-conditioner-0",
+            unet_path="/home/jiachun/codebase/vid_gen/experiment/test_hf/test_hf-unet-1",
+            conditioner_path="/home/jiachun/codebase/vid_gen/experiment/test_hf/test_hf-conditioner-1",
             data_path="/data/vsd_data/captioned_8s_64f_motion",
 
             # ckpt_path="/home/jiachun/codebase/vsd/cog/experiment/2k/2k-35000-ckpt",
