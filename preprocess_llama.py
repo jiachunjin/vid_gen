@@ -21,7 +21,7 @@ instruction = '''
 
 def process_prompts(shared_dict, mp4s_and_caps: list, current_index, device: str = None):
     with torch.no_grad():
-        model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct", torch_dtype=torch.bfloat16,).to(device)
+        model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct", torch_dtype=torch.bfloat16, token="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").to(device)
 
         terminators = [
             tokenizer.eos_token_id,
@@ -41,7 +41,7 @@ def process_prompts(shared_dict, mp4s_and_caps: list, current_index, device: str
             attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=model.device)
 
             outputs = model.generate(
-                input_ids,
+                input_ids,  
                 max_new_tokens=256,
                 eos_token_id=terminators,
                 do_sample=True,
