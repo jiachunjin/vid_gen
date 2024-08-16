@@ -192,7 +192,7 @@ def main():
 
     if accelerator.is_main_process:
         accelerator.init_trackers(args.wandb_proj, config=vars(args))
-        login(token="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")
+        login(token="")
 
     done = False
     epoch = 0
