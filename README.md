@@ -23,15 +23,26 @@ conda activate vid_gen
 There are two steps in preprocessing part: Use ```llama-3``` to rewrite the caption and encode the videos into ```vae latents```.
 
 **Step 1:** ```preprocess_llama.py```
-Before executing, config ```cudas``` and ```csv_path``` in ```line 67``` and ```line 68```.
-Execute ```python preprocess_llama.py``` to use ```llama-3``` to generate rewrite ```caption_dict.pkl```. 
 
-**Remaining questions:** Is it possible to run llama-3 on batch-parallel level? One model requires 16+G VRAM, then is it possible to run multiple models on one GPU and boost the preprocessing?
+Before executing, config ```cudas``` to utilize the available GPUs and ```csv_path``` to access ```OpenVid-1M.csv```, which is acquired in **Dataset Downloading** part. (```line 67``` and ```line 68```)
+Execute ```python preprocess_llama.py``` to use ```llama-3``` to generate recaption ```caption_dict.pkl```. 
+
+**Remaining questions:** Is it possible to run llama-3 on batch-parallel level? One model requires 16+G VRAM, then is it possible to run multiple models on one GPU and boost the preprocessing? (an update: see the last sentence of this paragraph.)
 
 Bingde: Currently the script is using my llama-3 token via passing the argument```token="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"``` in ```line 24```. Alternatively, you may apply for one on https://huggingface.co/meta-llama/Meta-Llama-3-8B.
 
-**Step 2:** ```preprocess_vae.py```
-This step involves ```vae``` to encode videos into ```latents```. Related code will be pushed to GitHub later.
+**Step 2:** ```preprocess_vae_16fps.py```
+
+This step involves ```vae``` to encode videos into ```latents``` with ```16fps``` and ```64 frames``` in total. Before executing, 
+1. config ```cudas``` to utilize the available GPUs. (```line 123```)
+2. config ```data_path``` to access the videos. There should be a folder containing all ```*.mp4``` files. (```line 124```)
+3. config ```vae_path``` to access the pretrained ```vae``` model downloaded in **Environment Setup** part. (```line 125```)
+4. config ```caption_dict_path``` to access ```caption_dict.pkl``` generated in **Step 1**. (```line 126```)
+5. config a proper ```output_path``` to save all the ```vae latents```. (```line 127```)
+
+**Remaining questions:** The variable ```step``` in ```line 95``` may affect the processing speed of ```vae```. A larger value like 32 or 64 may be faster (more VRAM required). 
+
+By several preliminary testings, running multiple threads on one GPU or increasing the value of ```step``` are unlikely to boost the processing.
 
 
 ## Experiment Launching
