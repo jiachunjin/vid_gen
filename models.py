@@ -127,27 +127,43 @@ class Conditioner(nn.Module, PyTorchModelHubMixin):
 class UNet_context(UNet2DConditionModel):
     def return_extra_parameters(self):
         parameters = []
+        parameters.extend(list(self.conditioner.parameters()))
         for down_block in self.down_blocks:
             if isinstance(down_block, DownBlock2D):
                 continue
-            parameters.extend(down_block.extra_attn_1.parameters())
-            parameters.extend(down_block.extra_attn_2.parameters())
+            parameters.extend(list(down_block.extra_attn_1.parameters()))
+            parameters.extend(list(down_block.extra_attn_2.parameters()))
             # parameters.extend(down_block.adaln.parameters())
 
-        parameters.extend(self.mid_block.extra_attn.parameters())
+        parameters.extend(list(self.mid_block.extra_attn.parameters()))
         # parameters.extend(self.mid_block.adaln.parameters())
 
         for up_block in self.up_blocks:
             if isinstance(up_block, UpBlock2D):
                 continue
-            parameters.extend(up_block.extra_attn_1.parameters())
-            parameters.extend(up_block.extra_attn_2.parameters())
-            parameters.extend(up_block.extra_attn_3.parameters())
+            parameters.extend(list(up_block.extra_attn_1.parameters()))
+            parameters.extend(list(up_block.extra_attn_2.parameters()))
+            parameters.extend(list(up_block.extra_attn_3.parameters()))
             # parameters.extend(up_block.adaln.parameters())
 
         return parameters
 
-    def hack(self):
+    def hack(
+        self,
+        con_depth,
+        con_lenq,
+        con_heads,
+        con_dim_head,
+        con_num_media_embeds,
+    ):
+        self.conditioner = Conditioner(
+            dim              = 1024,
+            depth            = con_depth,
+            num_latents      = con_lenq,
+            heads            = con_heads,
+            dim_head         = con_dim_head,
+            num_media_embeds = con_num_media_embeds,
+        )
         ##############################################################################################################
         ################################################# Down block #################################################
         ##############################################################################################################
@@ -515,8 +531,10 @@ class UNet_context(UNet2DConditionModel):
         mid_block_additional_residual: Optional[torch.Tensor] = None,
         down_intrablock_additional_residuals: Optional[Tuple[torch.Tensor]] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
-        context_tokens: Optional[torch.Tensor] = None,
+        # context_tokens: Optional[torch.Tensor] = None,
         # frame_indices: Optional[torch.Tensor] = None,
+        latents: Optional[torch.Tensor] = None,
+        random_frame_indices: Optional[torch.Tensor] = None,
         return_dict: bool = True,
     ) -> Union[UNet2DConditionOutput, Tuple]:
         r"""
@@ -641,6 +659,7 @@ class UNet_context(UNet2DConditionModel):
             gligen_args = cross_attention_kwargs.pop("gligen")
             cross_attention_kwargs["gligen"] = {"objs": self.position_net(**gligen_args)}
 
+        context_tokens = self.conditioner(latents, random_frame_indices) # (b, l, d)
         # 3. down
         # we're popping the `scale` instead of getting it because otherwise `scale` will be propagated
         # to the internal blocks and will raise deprecation warnings. this will be confusing for our users.

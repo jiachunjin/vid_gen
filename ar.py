@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 from einops import rearrange
 import pandas as pd
 import random
+from safetensors.torch import load_file
 from huggingface_hub import login, logout
 
 from dataset import captioned_video
@@ -99,41 +100,57 @@ def get_models(args):
     from transformers import CLIPTextModel, CLIPTokenizer
     from models import UNet_context, Conditioner
 
-    conditioner = Conditioner(
-        dim              = 1024,
-        depth            = args.con_depth,
-        num_latents      = args.con_lenq,
-        heads            = args.con_heads,
-        dim_head         = args.con_dim_head,
-        num_media_embeds = args.con_num_media_embeds,
-    )
+    # conditioner = Conditioner(
+    #     dim              = 1024,
+    #     depth            = args.con_depth,
+    #     num_latents      = args.con_lenq,
+    #     heads            = args.con_heads,
+    #     dim_head         = args.con_dim_head,
+    #     num_media_embeds = args.con_num_media_embeds,
+    # )
 
     unet = UNet_context.from_pretrained(os.path.join(args.sd_path, "unet"))
     unet.eval()
     unet.requires_grad_(False)
-    unet.hack()
+    unet.hack(
+        con_depth            = args.con_depth,
+        con_lenq             = args.con_lenq,
+        con_heads            = args.con_heads,
+        con_dim_head         = args.con_dim_head,
+        con_num_media_embeds = args.con_num_media_embeds,
+    )
     
     noise_scheduler = DDPMScheduler.from_pretrained(os.path.join(args.sd_path, "scheduler"))
     tokenizer = CLIPTokenizer.from_pretrained(os.path.join(args.sd_path, "tokenizer"))
     text_encoder = CLIPTextModel.from_pretrained(os.path.join(args.sd_path, "text_encoder"))
     text_encoder.requires_grad_(False)
 
-    return conditioner, unet, noise_scheduler, tokenizer, text_encoder
+    return unet, noise_scheduler, tokenizer, text_encoder
 
 
 def main():
     args = parse_args()
     accelerator, logger = get_logger_accelerator(args)
-    conditioner, unet, noise_scheduler, tokenizer, text_encoder = get_models(args)
+    unet, noise_scheduler, tokenizer, text_encoder = get_models(args)
     logger.info(f"UNet initialized from {args.sd_path}")
     if args.resume_path:
-        ckpt = torch.load(args.resume_path, map_location="cpu")
-        m, u = unet.load_state_dict(ckpt['unet'], strict=False)
-        m, u = conditioner.load_state_dict(ckpt['conditioner'])
-        if "global_step" in ckpt.keys():
-            global_step = ckpt["global_step"]
-        del ckpt
-        if accelerator.is_main_process: print(f"resume training from {args.resume_path}, global step: {global_step}")
+        raise NotImplementedError
+        unet_path = "/home/jiachun/codebase/vid_gen/experiment/2k/2k-unet-10"
+        conditioner_path = "/home/jiachun/codebase/vid_gen/experiment/2k/2k-conditioner-10"
+
+        unet_state_path = os.path.join(unet_path, "diffusion_pytorch_model.safetensors")
+        unet_state_dict = load_file(unet_state_path)
+        unet.load_state_dict(unet_state_dict)
+
+        conditioner = conditioner.from_pretrained(conditioner_path)
+        global_step = 10000
+        # ckpt = torch.load(args.resume_path, map_location="cpu")
+        # m, u = unet.load_state_dict(ckpt['unet'], strict=False)
+        # m, u = conditioner.load_state_dict(ckpt['conditioner'])
+        # if "global_step" in ckpt.keys():
+        #     global_step = ckpt["global_step"]
+        # del ckpt
+        # if accelerator.is_main_process: print(f"resume training from {args.resume_path}, global step: {global_step}")
     else:
         global_step = 0
 
@@ -144,7 +161,7 @@ def main():
         weight_dtype = torch.bfloat16
 
     unet.to(accelerator.device, dtype=weight_dtype)
-    conditioner.to(accelerator.device, dtype=weight_dtype)
+    # conditioner.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     unet_params = []
@@ -153,11 +170,12 @@ def main():
     for p in unet_params:
         p.requires_grad = True
 
-    params_to_learn = unet_params + list(conditioner.parameters())
+    # params_to_learn = unet_params + list(conditioner.parameters())
+    params_to_learn = unet_params
 
     if args.mixed_precision == "fp16":
         cast_training_params(unet, dtype=torch.float32)
-        cast_training_params(conditioner, dtype=torch.float32)
+        # cast_training_params(conditioner, dtype=torch.float32)
 
     if args.gc:
         unet.enable_gradient_checkpointing()
@@ -171,10 +189,10 @@ def main():
         eps=1e-8,
     )
     total_params = sum(p.numel() for p in optimizer.param_groups[0]['params'])
-    conditioner_num_train = sum(p.numel() for p in conditioner.parameters() if p.requires_grad)
+    # conditioner_num_train = sum(p.numel() for p in conditioner.parameters() if p.requires_grad)
     unet_num_train = sum(p.numel() for p in unet_params if p.requires_grad)
     
-    logger.info(f"Total optimized parameters: {total_params}, conditioner: {conditioner_num_train}, unet: {unet_num_train}")
+    logger.info(f"Total optimized parameters: {total_params}, unet: {unet_num_train}")
 
     train_dataloader = torch.utils.data.DataLoader(
         captioned_video(args.data_dir, subset=args.num_train_samples),
@@ -186,13 +204,13 @@ def main():
         drop_last=True,
     )
 
-    unet, conditioner, optimizer, train_dataloader = accelerator.prepare(
-        unet, conditioner, optimizer, train_dataloader
+    unet, optimizer, train_dataloader = accelerator.prepare(
+        unet, optimizer, train_dataloader
     )
 
     if accelerator.is_main_process:
         accelerator.init_trackers(args.wandb_proj, config=vars(args))
-        login(token="")
+        # login(token="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")
 
     done = False
     epoch = 0
@@ -208,13 +226,11 @@ def main():
         acc_steps = 0
         for _, batch in enumerate(train_dataloader):
             unet.train()
-            conditioner.train()
-            with accelerator.accumulate(unet, conditioner):
+            # conditioner.train()
+            with accelerator.accumulate(unet):
                 latents, video_length, caption = batch
                 caption = list(caption)
                 latents = latents * 0.18215
-                # latents = latents.repeat(2, 1, 1, 1, 1)
-                # video_length = video_length.repeat(2)
                 b, f, c, h, w = latents.shape
                 
                 drop_indices = random.sample(range(b), int(b * args.uncon_ratio))
@@ -261,7 +277,7 @@ def main():
                 
                 # target = noise_scheduler.get_velocity(selected_frames, noise, timesteps)
                 # exit(0)
-                context = conditioner(latents, random_frame_indices) # (b, l, d)
+                # context = conditioner(latents, random_frame_indices) # (b, l, d)
                 # mask = (torch.rand(b) > args.p_uncond).float().unsqueeze(1).unsqueeze(2).to(accelerator.device)
                 # mask = mask.expand(-1, context.shape[1], context.shape[2])
                 # context = context * mask
@@ -269,10 +285,11 @@ def main():
                 # print(context.shape, noisy_latents.shape)
                 # exit(0)
                 model_pred = unet(
-                    sample=noisy_latents,
-                    timestep=timesteps,
-                    encoder_hidden_states=txt_embedding,
-                    context_tokens=context
+                    sample                = noisy_latents,
+                    timestep              = timesteps,
+                    encoder_hidden_states = txt_embedding,
+                    latents               = latents,
+                    random_frame_indices  = random_frame_indices,
                 ).sample
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
@@ -303,11 +320,11 @@ def main():
 
                 if global_step % args.save_every == 0 or global_step == 1000:
                     unet.eval()
-                    conditioner.eval()
+                    # conditioner.eval()
                     if accelerator.is_main_process:
                         # save_path = os.path.join(args.output_dir, f"{args.exp_name}-{global_step}-ckpt")
                         unwarped_unet = accelerator.unwrap_model(unet)
-                        unwarped_conditioner = accelerator.unwrap_model(conditioner)
+                        # unwarped_conditioner = accelerator.unwrap_model(conditioner)
                         # torch.save(
                         #     {
                         #         "unet": unwarped_unet.state_dict(),
@@ -317,10 +334,10 @@ def main():
                         #     save_path
                         # )
                         unwarped_unet.save_pretrained(os.path.join(args.output_dir, f"{args.exp_name}-unet-{int(global_step / 1000)}"))
-                        unwarped_conditioner.save_pretrained(os.path.join(args.output_dir, f"{args.exp_name}-conditioner-{int(global_step / 1000)}"))
+                        # unwarped_conditioner.save_pretrained(os.path.join(args.output_dir, f"{args.exp_name}-conditioner-{int(global_step / 1000)}"))
 
                         unwarped_unet.push_to_hub("orres/vid_gen")
-                        unwarped_conditioner.push_to_hub("orres/vid_gen")
+                        # unwarped_conditioner.push_to_hub("orres/vid_gen")
                         logger.info(f"pushed to hugging face at step {global_step}")
 
                 accelerator.wait_for_everyone()

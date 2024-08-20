@@ -7,12 +7,12 @@ accelerate launch --main_process_port 29505 ar.py \
 --exp_name "scale_up" \
 --output_dir "experiment/scale_up" \
 --sd_path "./ckpts/zsnr" \
---data_dir "path_to_data" \
+--data_dir "/data/vsd_data/captioned_8s_64f_motion/" \
 --weighting "snr" \
 --uncon_ratio 0.5 \
 --learning_rate 0.00005 \
 --mixed_precision "fp16" \
---max_train_steps 1000000 \
+--max_train_steps 100000 \
 --train_batch_size 5 \
 --gradient_accumulation_steps 1 \
 --gc \
