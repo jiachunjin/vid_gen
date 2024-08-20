@@ -17,7 +17,8 @@ class captioned_video():
         z = torch.load(os.path.join(self.path, str(index))) # 2500
         latent = z["latent"]
         caption = z["caption"]
-        return latent, len(latent), caption
+        len_v = z["length"]
+        return latent, len_v, caption
 
     def __len__(self):
         return self.length
