@@ -1,4 +1,7 @@
-# Video Gen README
+## What's New?
+We switch to plan A (more details in docs/doc.pdf)
+1. Now we should filter out videos that are shorter than 64 frames (i.e. videos with padding in the end)
+2. Command to launch experiments changes to ```nohup sh train.sh > log.txt 2>&1 &```
 
 ## Dataset Downloading
 Dataset: OpenVid-1M, https://github.com/NJU-PCALab/OpenVid-1M/tree/main
