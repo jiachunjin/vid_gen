@@ -32,6 +32,63 @@ def get_conditioner(
     return conditioner
 
 
+class PerceiverAttention(nn.Module):
+    def __init__(self, *, dim, dim_head=64, heads=8):
+        super().__init__()
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+        inner_dim = dim_head * heads
+
+        self.norm_media = nn.LayerNorm(dim)
+        self.norm_latents = nn.LayerNorm(dim)
+
+        self.to_q = nn.Linear(dim, inner_dim)
+        self.to_kv = nn.Linear(dim, inner_dim * 2)
+        self.to_out = nn.Linear(inner_dim, dim)
+
+    def forward(self, x, latents):
+        x = self.norm_media(x)
+        latents = self.norm_latents(latents)
+
+        h = self.heads
+        q = self.to_q(latents)
+
+        # x: (b, n, d), latents: (b, num_latents, d), kv_input: (b, n+num_latents, d)
+        kv_input = torch.cat((x, latents), dim=-2)
+        k, v = self.to_kv(kv_input).chunk(2, dim=-1) # (b, n+num_latents, inner_dim * 2)
+
+        q, k, v = einops_exts.rearrange_many((q, k, v), "b n (h d) -> b h n d", h = h)
+        q = q * self.scale
+
+        # attention
+        sim = einsum("... i d, ... j d  -> ... i j", q, k) # i = num_latents of q, j = n + num_latents
+        # if indices is not None:
+        #     mask = torch.zeros_like(sim) # (b, h, i, j)
+        #     b, n, d = x.shape
+        #     slice_size = n // f
+        #     for i, idx in enumerate(indices):
+        #         start_idx = idx * slice_size
+        #         mask[i, :, :, start_idx:(start_idx+slice_size)] = -torch.inf
+        #     sim = sim + mask
+        sim = sim - sim.amax(dim = -1, keepdim = True).detach()
+        attn = sim.softmax(dim = -1)
+
+        out = einsum("... i j, ... j d -> ... i d", attn, v)
+        out = einops.rearrange(out, "b h n d -> b n (h d)", h = h)
+
+        return self.to_out(out)
+
+
+def FeedForward(dim, mult=4):
+    inner_dim = int(dim * mult)
+    return nn.Sequential(
+        nn.LayerNorm(dim),
+        nn.Linear(dim, inner_dim, bias=False),
+        nn.GELU(),
+        nn.Linear(inner_dim, dim, bias=False),
+    )
+
+
 class Noisy_Conditioner_Q_Former(nn.Module):
     def __init__(
             self,
@@ -93,59 +150,22 @@ class Noisy_Conditioner_Q_Former(nn.Module):
 
         return result
 
-
-class PerceiverAttention(nn.Module):
-    def __init__(self, *, dim, dim_head=64, heads=8):
-        super().__init__()
-        self.scale = dim_head ** -0.5
-        self.heads = heads
-        inner_dim = dim_head * heads
-
-        self.norm_media = nn.LayerNorm(dim)
-        self.norm_latents = nn.LayerNorm(dim)
-
-        self.to_q = nn.Linear(dim, inner_dim)
-        self.to_kv = nn.Linear(dim, inner_dim * 2)
-        self.to_out = nn.Linear(inner_dim, dim)
-
-    def forward(self, x, latents):
-        x = self.norm_media(x)
-        latents = self.norm_latents(latents)
-
-        h = self.heads
-        q = self.to_q(latents)
-
-        # x: (b, n, d), latents: (b, num_latents, d), kv_input: (b, n+num_latents, d)
-        kv_input = torch.cat((x, latents), dim=-2)
-        k, v = self.to_kv(kv_input).chunk(2, dim=-1) # (b, n+num_latents, inner_dim * 2)
-
-        q, k, v = einops_exts.rearrange_many((q, k, v), "b n (h d) -> b h n d", h = h)
-        q = q * self.scale
-
-        # attention
-        sim = einsum("... i d, ... j d  -> ... i j", q, k) # i = num_latents of q, j = n + num_latents
-        # if indices is not None:
-        #     mask = torch.zeros_like(sim) # (b, h, i, j)
-        #     b, n, d = x.shape
-        #     slice_size = n // f
-        #     for i, idx in enumerate(indices):
-        #         start_idx = idx * slice_size
-        #         mask[i, :, :, start_idx:(start_idx+slice_size)] = -torch.inf
-        #     sim = sim + mask
-        sim = sim - sim.amax(dim = -1, keepdim = True).detach()
-        attn = sim.softmax(dim = -1)
-
-        out = einsum("... i j, ... j d -> ... i d", attn, v)
-        out = einops.rearrange(out, "b h n d -> b n (h d)", h = h)
-
-        return self.to_out(out)
-
-
-def FeedForward(dim, mult=4):
-    inner_dim = int(dim * mult)
-    return nn.Sequential(
-        nn.LayerNorm(dim),
-        nn.Linear(dim, inner_dim, bias=False),
-        nn.GELU(),
-        nn.Linear(inner_dim, dim, bias=False),
-    )
+if __name__ == "__main__":
+    device = torch.device("cuda:7")
+    conditioner = get_conditioner(
+        con_type = "qformer",
+        con_dim = 1024,
+        con_depth = 12,
+        con_numq = 512,
+        con_nframes = 64,
+        con_patch_size = 8,
+        con_dim_head = 256,
+        con_heads = 16,
+    ).to(device)
+    with torch.no_grad(), torch.cuda.amp.autocast():
+        b = 1
+        x = torch.randn(b, 64, 4, 64, 64).to(device)
+        timesteps = torch.randint(0, 1000, (b,)).to(device)
+        random_frame_indices = torch.randint(0, 64, (b,)).to(device)
+        context_token = conditioner(x, timesteps, random_frame_indices)
+        print(sum(p.numel() for p in conditioner.parameters()), torch.cuda.max_memory_allocated(device) / 1024 / 1024, "MB")
