@@ -9,8 +9,11 @@ accelerate launch --main_process_port 29505 train.py \
 --data_dir "/data/vsd_data/captioned_8s_64f_motion/" \
 --weighting "snr" \
 --con_type "qformer" \
---con_depth 2 \
+--con_depth 12 \
 --con_nframes 64 \
+--con_heads 16 \
+--con_dim_head 256 \
+--num_train_samples 50000 \
 --p_uncond 1.0 \
 --learning_rate 0.0001 \
 --mixed_precision "fp16" \
