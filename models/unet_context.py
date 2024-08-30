@@ -533,7 +533,7 @@ class UNet_context(UNet2DConditionModel):
         if contexts is not None:
             if random_frame_indices is None:
                 # inference mode
-                context_batch = 32
+                context_batch = 8
                 context_tokens = []
                 b, f, c, h, w = contexts.shape
                 for i in range(0, f, context_batch):

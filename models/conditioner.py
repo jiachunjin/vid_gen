@@ -72,6 +72,11 @@ class PerceiverAttention(nn.Module):
         #     sim = sim + mask
         sim = sim - sim.amax(dim = -1, keepdim = True).detach()
         attn = sim.softmax(dim = -1)
+        # import matplotlib.pyplot as plt
+        # plt.matshow(attn[0].mean(dim=0).cpu().numpy())
+        # plt.colorbar()
+        # plt.savefig("samples/attn.png")
+        # plt.close()
 
         out = einsum("... i j, ... j d -> ... i d", attn, v)
         out = einops.rearrange(out, "b h n d -> b n (h d)", h = h)

@@ -203,6 +203,8 @@ def main():
 
     while not done:
         train_loss = 0.0
+        uncon_loss = 0.0
+        con_loss = 0.0
         acc_steps = 0
         for _, batch in enumerate(train_dataloader):
             unet.train()
@@ -265,11 +267,20 @@ def main():
                 ).sample
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+
+                cond_indices = [index for index, value in enumerate(caption) if value != ""]
+                uncond_indices = [index for index, value in enumerate(caption) if value == ""]
+                loss_cond = loss[cond_indices].mean()
+                loss_uncond = loss[uncond_indices].mean()
+
                 loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
                 loss = loss.mean()
 
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item()
+
+                avg_loss_cond = accelerator.gather(loss_cond).mean().item()
+                avg_loss_uncond = accelerator.gather(loss_uncond).mean().item()
 
                 acc_steps += 1
                 accelerator.backward(loss)
@@ -284,7 +295,7 @@ def main():
                 progress_bar.update(1)
                 train_loss /= acc_steps
                 acc_steps = 0
-                accelerator.log({"train_loss": train_loss}, step=global_step)
+                accelerator.log({"train_loss": train_loss, "loss_cond": avg_loss_cond, "loss_uncond": avg_loss_uncond}, step=global_step)
                 logs = {"step_loss": train_loss}
                 progress_bar.set_postfix(**logs)
                 train_loss = 0.0

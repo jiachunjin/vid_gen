@@ -1,5 +1,5 @@
-export NCCL_P2P_DISABLE=1
-export NCCL_IB_DISABLE=1
+# export NCCL_P2P_DISABLE=1
+# export NCCL_IB_DISABLE=1
 # accelerate launch train.py \
 accelerate launch --main_process_port 29505 train.py \
 --wandb_proj "scale_up" \
@@ -14,13 +14,13 @@ accelerate launch --main_process_port 29505 train.py \
 --con_heads 16 \
 --con_dim_head 256 \
 --num_train_samples 50000 \
---p_uncond 1.0 \
---learning_rate 0.0001 \
+--p_uncond 0.5 \
+--learning_rate 0.00005 \
 --mixed_precision "fp16" \
 --max_train_steps 100000 \
 --gc \
---train_batch_size 5 \
+--train_batch_size 25 \
 --gradient_accumulation_steps 1 \
 --save_every 1000 \
 --push_to_hub \
---report_to "no"
+--report_to "wandb"
