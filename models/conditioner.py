@@ -132,11 +132,6 @@ class Noisy_Conditioner_Q_Former(nn.Module):
         x = rearrange(x, "b f c h w -> (b f) c h w")
         x = rearrange(self.patch_embedding(x), "(b f) num_patch d -> b f num_patch d", f=f)
 
-        # if random_frame_indices is None:
-        #     random_frame_indices = torch.arange(f).to(x.device)
-        #     x = x.repeat(f, 1, 1, 1)
-            # timesteps = timesteps.repeat(f)
-
         time_token = self.context_time_emb(timesteps)[:, None, :]
         frame_token = self.frame_emb(random_frame_indices).unsqueeze(dim=1)
 
