@@ -533,7 +533,7 @@ class UNet_context(UNet2DConditionModel):
         if contexts is not None:
             if random_frame_indices is None:
                 # inference mode
-                context_batch = 16
+                context_batch = 4
                 context_tokens = []
                 b, f, c, h, w = contexts.shape
                 for i in range(0, f, context_batch):
@@ -542,6 +542,9 @@ class UNet_context(UNet2DConditionModel):
                 context_tokens = torch.cat(context_tokens, dim=0)
             else:
                 context_tokens = self.conditioner(contexts, timestep, random_frame_indices) # (b, l, d)
+                # context_tokens_down = self.conditioner(contexts, timestep, random_frame_indices) # (b, l, d)
+                # context_tokens_mid = self.conditioner_mid(contexts, timestep, random_frame_indices) # (b, l, d)
+                # context_tokens_up = self.conditioner_up(contexts, timestep, random_frame_indices) # (b, l, d)
         else:
             context_tokens = None
         # 3. down

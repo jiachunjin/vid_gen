@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch import einsum
 from einops import rearrange, repeat
 from diffusers.models.embeddings import PatchEmbed
+from diffusers.models.attention import Attention
 
 def get_conditioner(
         con_type,
@@ -32,6 +33,49 @@ def get_conditioner(
     return conditioner
 
 
+class Context_Transformer(nn.Module):
+    def __init__(
+        self,
+        dim,    
+    ):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+        self.attn_spatial = Attention(
+            dim,
+            heads=16,
+            dim_head=88,
+        )
+        self.attn_temporal = Attention(
+            dim,
+            heads=16,
+            dim_head=88,
+        )
+        self.ff = FeedForward(
+            dim=dim,
+            mult=4
+        )
+        
+    def forward(self, x):
+        """
+        x: (b, f, l, d)
+        """
+        b, f, l, d = x.shape
+        x_spatial = rearrange(x, "b f l d -> (b f) l d").contiguous()
+        x_spatial = self.norm1(x_spatial)
+        x_spatial = self.attn_spatial(x_spatial)
+        x_spatial = rearrange(x_spatial, "(b f) l d -> b f l d", f=f)
+        x = x + x_spatial
+
+        x_temporal = rearrange(x, "b f l d -> (b l) f d").contiguous()
+        x_temporal = self.attn_temporal(x_temporal)
+        x = x + rearrange(x_temporal, "(b l) f d -> b f l d", l=l)
+        x = self.norm2(x)
+        x = self.ff(x)
+
+        return x
+
+
 class PerceiverAttention(nn.Module):
     def __init__(self, *, dim, dim_head=64, heads=8):
         super().__init__()
@@ -46,7 +90,7 @@ class PerceiverAttention(nn.Module):
         self.to_kv = nn.Linear(dim, inner_dim * 2)
         self.to_out = nn.Linear(inner_dim, dim)
 
-    def forward(self, x, latents):
+    def forward(self, x, latents, show=False):
         x = self.norm_media(x)
         latents = self.norm_latents(latents)
 
@@ -56,6 +100,7 @@ class PerceiverAttention(nn.Module):
         # x: (b, n, d), latents: (b, num_latents, d), kv_input: (b, n+num_latents, d)
         kv_input = torch.cat((x, latents), dim=-2)
         k, v = self.to_kv(kv_input).chunk(2, dim=-1) # (b, n+num_latents, inner_dim * 2)
+        # k, v = self.to_kv(x).chunk(2, dim=-1)
 
         q, k, v = einops_exts.rearrange_many((q, k, v), "b n (h d) -> b h n d", h = h)
         q = q * self.scale
@@ -72,11 +117,12 @@ class PerceiverAttention(nn.Module):
         #     sim = sim + mask
         sim = sim - sim.amax(dim = -1, keepdim = True).detach()
         attn = sim.softmax(dim = -1)
-        # import matplotlib.pyplot as plt
-        # plt.matshow(attn[0].mean(dim=0).cpu().numpy())
-        # plt.colorbar()
-        # plt.savefig("samples/attn.png")
-        # plt.close()
+        # if show:
+        #     import matplotlib.pyplot as plt
+        #     plt.matshow(attn[0].mean(dim=0).cpu().numpy())
+        #     plt.colorbar()
+        #     plt.savefig("samples/attn.png")
+        #     plt.close()
 
         out = einsum("... i j, ... j d -> ... i d", attn, v)
         out = einops.rearrange(out, "b h n d -> b n (h d)", h = h)
@@ -92,6 +138,35 @@ def FeedForward(dim, mult=4):
         nn.GELU(),
         nn.Linear(inner_dim, dim, bias=False),
     )
+
+class Window_Layer(nn.Module):
+    def __init__(self, dim, dim_head, heads, ff_mult):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.attn = Attention(
+            dim,
+            heads=heads,
+            dim_head=dim_head,
+        )
+        self.ff = FeedForward(dim, ff_mult)
+
+    def forward(self, x):
+        x = self.norm(x)
+        x = self.attn(x) + x
+        x = self.ff(x) + x
+        return x
+
+class Window_Transformer(nn.Module):
+    def __init__(self, dim, dim_head, heads, ff_mult, layers):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for _ in range(layers):
+            self.layers.append(Window_Layer(dim, dim_head, heads, ff_mult))
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 
 class Noisy_Conditioner_Q_Former(nn.Module):
@@ -120,10 +195,16 @@ class Noisy_Conditioner_Q_Former(nn.Module):
         self.layers = nn.ModuleList([])
         self.frame_emb = nn.Embedding(num_frames, dim)
         self.context_time_emb = nn.Embedding(1000, dim)
+        # self.st_transformer = Context_Transformer(dim)
+        # self.window_transformer = Window_Transformer(dim, dim_head, heads, ff_mult, 4)
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
+                # nn.LayerNorm(dim),
                 PerceiverAttention(dim=dim, dim_head=dim_head, heads=heads),
-                FeedForward(dim=dim, mult=ff_mult)
+                FeedForward(dim=dim, mult=ff_mult),
+                # nn.LayerNorm(dim),
+                # Attention(dim, heads=heads, dim_head=dim_head),
+                # FeedForward(dim=dim, mult=ff_mult),
             ]))
         self.norm = nn.LayerNorm(dim)
 
@@ -142,9 +223,18 @@ class Noisy_Conditioner_Q_Former(nn.Module):
 
         latents = repeat(self.latents, "num_q d -> b num_q d", b=x.shape[0])
 
-        for attn, ff in self.layers:
+        for i, (attn, ff) in enumerate(self.layers):
             latents = attn(x, latents) + latents
             latents = ff(latents) + latents
+
+        # for i, (cross_norm, cross_attn, cross_ff, self_norm, self_attn, self_ff) in enumerate(self.layers):
+        #     latents = cross_norm(latents)
+        #     latents = cross_attn(x, latents) + latents
+        #     latents = cross_ff(latents) + latents
+            
+        #     latents = self_norm(latents)
+        #     latents = self_attn(latents) + latents
+        #     latents = self_ff(latents) + latents
 
         result = self.norm(latents)
 
@@ -155,15 +245,15 @@ if __name__ == "__main__":
     conditioner = get_conditioner(
         con_type = "qformer",
         con_dim = 1024,
-        con_depth = 12,
-        con_numq = 512,
+        con_depth = 20,
+        con_numq = 1024,
         con_nframes = 64,
         con_patch_size = 8,
         con_dim_head = 256,
         con_heads = 16,
     ).to(device)
     with torch.no_grad(), torch.cuda.amp.autocast():
-        b = 1
+        b = 16
         x = torch.randn(b, 64, 4, 64, 64).to(device)
         timesteps = torch.randint(0, 1000, (b,)).to(device)
         random_frame_indices = torch.randint(0, 64, (b,)).to(device)

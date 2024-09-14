@@ -19,9 +19,12 @@ from safetensors.torch import load_file
 
 from utils.dataset import captioned_video
 
+import os
+
 def parse_args():
     parser = argparse.ArgumentParser(description="vsd parser")
     # sd
+    parser.add_argument("--interface", type=str, choices=["old", "new"])
     parser.add_argument("--sd_path", type=str, default="/home/jiachun/codebase/vsd/ckpts/zsnr")
     # conditioner
     parser.add_argument("--con_type", type=str, choices=["qformer", "avgpool"], default="qformer")
@@ -35,7 +38,7 @@ def parse_args():
     parser.add_argument("--con_num_temporal_state", type=int, default=8)
     parser.add_argument("--con_num_spatial_state", type=int, default=4)
     # training
-    parser.add_argument("--weighting", choices=["**", "minsnr", "no", "snr", "maxsnr"])
+    parser.add_argument("--weighting", choices=["uniform", "snr", "minsnr", "maxsnr"])
     parser.add_argument("--data_dir", type=str, default="/data/vsd_data/captioned_OpenVid")
     parser.add_argument("--p_uncond", type=float, default=1.0)
     parser.add_argument("--resume_path", type=str, default=None)
@@ -99,22 +102,35 @@ def get_models(args):
     from diffusers import DDPMScheduler
     from transformers import CLIPTextModel, CLIPTokenizer
     from models.unet_context import UNet_context
+    from models.unet_distributed import UNet_distributed
+    if args.interface == "old":
+        unet = UNet_context.from_pretrained(os.path.join(args.sd_path, "unet"))
+        unet.eval()
+        unet.requires_grad_(False)
+        unet.hack(
+            args.con_type,
+            args.con_dim,
+            args.con_depth,
+            args.con_numq,
+            args.con_nframes,
+            args.con_patch_size,
+            args.con_heads,
+            args.con_dim_head,
+        )
+    elif args.interface == "new":
+        unet = UNet_distributed.from_pretrained_2d(
+            os.path.join(args.sd_path, "unet"),
+            con_type = args.con_type,
+            con_dim = args.con_dim,
+            con_depth = args.con_depth,
+            con_numq = args.con_numq,
+            con_nframes = args.con_nframes,
+            con_patch_size = args.con_patch_size,
+            con_dim_head = args.con_dim_head,
+            con_heads = args.con_heads,
+        )
+        unet.requires_grad_(False)
 
-    unet = UNet_context.from_pretrained(os.path.join(args.sd_path, "unet"))
-
-    unet.eval()
-    unet.requires_grad_(False)
-    unet.hack(
-        args.con_type,
-        args.con_dim,
-        args.con_depth,
-        args.con_numq,
-        args.con_nframes,
-        args.con_patch_size,
-        args.con_heads,
-        args.con_dim_head,
-    )
-    
     noise_scheduler = DDPMScheduler.from_pretrained(os.path.join(args.sd_path, "scheduler"))
     tokenizer = CLIPTokenizer.from_pretrained(os.path.join(args.sd_path, "tokenizer"))
     text_encoder = CLIPTextModel.from_pretrained(os.path.join(args.sd_path, "text_encoder"))
@@ -130,11 +146,17 @@ def main():
     if args.resume_path:
         unet_state_path = os.path.join(args.resume_path, "diffusion_pytorch_model.safetensors")
         unet_state_dict = load_file(unet_state_path)
-        unet.load_state_dict(unet_state_dict)
 
-        global_step = int(args.resume_path.split("/")[-1].split("-")[-1][:-1]) * 1000
-        logger.info(f"Resume training from {args.resume_path}, global step: {global_step}")
-        if accelerator.is_main_process: print(f"resume training from {args.resume_path}, global step: {global_step}")
+        model_dict = unet.state_dict()
+        pretrained_dict = {k: v for k, v in unet_state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+        model_dict.update(pretrained_dict)
+
+        unet.load_state_dict(model_dict, strict=False)
+
+        # global_step = int(args.resume_path.split("/")[-1].split("-")[-1][:-1]) * 1000
+        # logger.info(f"Resume training from {args.resume_path}, global step: {global_step}")
+        # if accelerator.is_main_process: print(f"resume training from {args.resume_path}, global step: {global_step}")
+        global_step = 0
     else:
         global_step = 0
 
@@ -190,7 +212,8 @@ def main():
 
     if accelerator.is_main_process:
         accelerator.init_trackers(args.wandb_proj, config=vars(args))
-        login(token="")
+        if args.push_to_hub:
+            login(token="")
 
     done = False
     epoch = 0
@@ -228,10 +251,8 @@ def main():
                 timesteps = timesteps.long()
 
                 snr = compute_snr(noise_scheduler, timesteps)
-                if args.weighting == "no":
+                if args.weighting == "uniform":
                     mse_loss_weights = 1 / (snr + 1)
-                if args.weighting == "**":
-                    mse_loss_weights = (snr + 1)**0.25
                 elif args.weighting == "snr":
                     mse_loss_weights = 1
                 elif args.weighting == "minsnr":
@@ -316,7 +337,8 @@ def main():
                 break
         epoch += 1
     if accelerator.is_main_process:
-        logout()
+        if args.push_to_hub:
+            logout()
 
     accelerator.end_training()
 
