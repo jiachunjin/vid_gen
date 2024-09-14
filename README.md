@@ -1,3 +1,24 @@
+
+## Update 24.09.14
+1. login huggingface with token: `xxx`
+2. download the previous ckpt with:
+
+``````bash
+cd ckpts/
+huggingface-cli download --resume-download ByteDance/sd2.1-base-zsnr-laionaes5 --local-dir zsnr
+huggingface-cli download --resume-download orres/vid_gen --local-dir 112k
+``````
+
+3. modify `train.sh`
+   - --sd_path "the path to zsnr/"
+   - --data_dir "the path to the processed Open-VID"
+   - --resume_path "the path to 112k/"
+   - --train_batch_size (调整到合适的大小)
+4. 过滤data_dir中的latents确保`len_v` == 64
+5. https://github.com/jiachunjin/vid_gen/blob/60b3d66d1fa2a73d0168219c2ea66c9fe4c65074/train.py#L216 填入huggingface token `xxx`
+
+
+
 ## What's New?
 We switch to plan A (more details in docs/doc.pdf)
 1. Now we should filter out videos that are shorter than 64 frames (i.e. videos with padding in the end)
